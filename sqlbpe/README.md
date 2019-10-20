@@ -17,5 +17,6 @@ To run BPE with the stopping criterion use
 
 To use AST BPE you first need to get the restrictions on the kinds of things that can represent nodes in the BPE tree
 > restrictions = {'train': sqlast.get_restrictions(listofseqs), 'val': sqlast.get_restrictions(val_listofseqs)}
- and then specifying these restrictions when calling either `fit` or `fit_to_valid`.
+
+and then specifying these restrictions when calling either `fit` or `fit_to_valid`.
 
