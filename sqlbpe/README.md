@@ -1,6 +1,6 @@
 ## SQL BPE
 
-In this direcotyr you can find the main code to use BPE on SQL.
+In this directory you can find the main code to use BPE on SQL.
 
 The code works on the tokenized datasets from [text2sql-data](https://github.com/jkkummerfeld/text2sql-data). AST SQL first detokenizes the data, and then builds an AST with the help of sqlparse.
 
