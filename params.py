@@ -26,3 +26,5 @@ class Params(NamedTuple):
     AST_BPE: bool = False # if BPE is used, should BPE be restricted to pairs of children of nodes in the SQL AST
     BPE_STEP_OVERRIDE_P_SCHEDULE: str = 'lambda epoch: 0.0'
     RNN_TYPE: str = 'LSTM'
+    KL_BPE: bool = False
+    KL_BPE_MIN_FREQ: int = 0

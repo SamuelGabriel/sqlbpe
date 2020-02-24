@@ -15,7 +15,7 @@ class SimpleSeq2Seq(torch.nn.Module):
         """
         super(SimpleSeq2Seq, self).__init__()
         
-        self.h_dim, self.activation, self.distribution, self.fixed_kappa, self.only_encode = h_dim, activation, distribution, fixed_kappa, only_encode
+        self.h_dim, self.activation, self.only_encode = h_dim, activation, only_encode
         
         self.encoder = encoder
         

@@ -10,14 +10,11 @@ import torchtext
 import encoder
 import decoder
 import attention
-import embedding
 import random
-import spacy
 from typing import NamedTuple, Optional
 import json
 from os import path, makedirs
 from rolloutdecoder import RollOutDecoder
-import hyperspherical_uniform
 from params import Params
 import pickle
 import time
@@ -54,9 +51,9 @@ parser.add_argument('--wordvec-dir', default='../glove')
 parser.add_argument('--beam-size', default=0, type=int)
 parser.add_argument('--beam-syntax-check', action='store_true')
 
-def get_datasets_and_fields(train_path, reverse_input, bpe_encoding_steps, bpe_copy_masking, auto_bpe_min_freq, ast_bpe, bpe_step_override_p_schedule):
+def get_datasets_and_fields(train_path, reverse_input, bpe_encoding_steps, bpe_copy_masking, auto_bpe_min_freq, ast_bpe, bpe_step_override_p_schedule, kl_bpe, kl_bpe_min_freq):
     if True:
-        (dataset, validset, testset), (src, trg) = utils.get_datasets(data_path=train_path, reverse_input=reverse_input, bpe_encoding_steps=bpe_encoding_steps, bpe_copy_masking=bpe_copy_masking, auto_bpe_min_freq=auto_bpe_min_freq, ast_bpe=ast_bpe, bpe_step_override_p_schedule=bpe_step_override_p_schedule)
+        (dataset, validset, testset), (src, trg) = utils.get_datasets(data_path=train_path, reverse_input=reverse_input, bpe_encoding_steps=bpe_encoding_steps, bpe_copy_masking=bpe_copy_masking, auto_bpe_min_freq=auto_bpe_min_freq, ast_bpe=ast_bpe, bpe_step_override_p_schedule=bpe_step_override_p_schedule, kl_bpe=kl_bpe, kl_bpe_min_freq=kl_bpe_min_freq)
         return dataset, validset, testset, src, trg
     else:
         return utils.get_translation_dataset()
@@ -76,17 +73,15 @@ def get_rnn_type(rnn_type_name):
 
 def get_model(params, wordvec_dir, src, trg, device):
     rnn_type = get_rnn_type(params.RNN_TYPE)
-    return SimpleSeq2Seq(h_dim=params.HID_DIM, trg_vocab=trg.vocab, distribution='vmf',
-                encoder=encoder.Encoder(len(src.vocab), params.HID_DIM, params.HID_DIM, params.HID_DIM, params.DROPOUT, len(trg.vocab), return_outputs=False, num_layers=params.NUM_ENCODER_LAYERS, bidirectional=params.BIDIRECTIONAL_ENCODER, embedding=embedding.get_embedding(src.vocab.itos, params.HID_DIM, wordvec_dir, freeze_embeddings=params.FREEZE_LOADED_EMBEDDINGS) if params.MIXED_SRC_EMBEDDINGS else None, rnn_type=rnn_type),
+    return SimpleSeq2Seq(h_dim=params.HID_DIM, trg_vocab=trg.vocab,
+                encoder=encoder.Encoder(len(src.vocab), params.HID_DIM, params.HID_DIM, params.HID_DIM, params.DROPOUT, len(trg.vocab), return_outputs=False, num_layers=params.NUM_ENCODER_LAYERS, bidirectional=params.BIDIRECTIONAL_ENCODER, embedding= None, rnn_type=rnn_type),
                 decoder=RollOutDecoder(params.TEACHER_FORCING_RATIO, 
                     decoder.Decoder(len(trg.vocab), params.HID_DIM,
                         params.HID_DIM, params.HID_DIM, params.DROPOUT, trg.vocab.stoi['<unk>'], rnn_type=rnn_type,
-                        embedding=embedding.get_embedding(trg.vocab.itos, params.HID_DIM, wordvec_dir,
-                        freeze_embeddings=params.FREEZE_LOADED_EMBEDDINGS) if params.MIXED_TRG_EMBEDDINGS else None,
+                        embedding= None,
                         num_layers=params.NUM_DECODER_LAYERS).to(device), 
                     target_vocab=trg.vocab, 
                     device=device),
-                fixed_kappa=params.FIXED_KAPPA
             ).to(device)
 
 def get_attention_model_getter(copying=False, extra_copy_vocab=0):
@@ -163,7 +158,7 @@ def train(epoch, train_loader, model, loss_function, optimizer, trg, log_interva
                 epoch, batch_idx, len(train_loader),
                 100. * batch_idx / len(train_loader),
                 loss.item(), num_corr/num_total))
-        if random.random() < .002 and intermediate_printing:
+        if random.random() < 1. and intermediate_printing:
             print('example ', batch_idx)
             print('trg: ', utils.batch_to_list_of_sentences(target[:,:1], trg.vocab.itos, max_len=10000))
             print('pred: ', utils.batch_to_list_of_sentences(preds[:,:1], trg.vocab.itos, max_len=10000))
@@ -202,7 +197,7 @@ def test(epoch, test_loader, model, loss_function, trg, attention, intermediate_
                 mini_acc_count += torch.sum(mask.type(torch.float))
 
                 w = sm(recon_batch)[torch.arange(len(recon_batch)), 0, preds[:,0]]
-                if random.random() < .005 and intermediate_printing:
+                if random.random() < .5 and intermediate_printing:
                     print('example ', i)
                     print('trg: ', utils.batch_to_list_of_sentences(target[:,:1], trg.vocab.itos, max_len=1000))
                     print('pred: ', utils.batch_to_list_of_sentences(preds[:,:1], trg.vocab.itos, max_len=1000))
@@ -221,6 +216,7 @@ def test(epoch, test_loader, model, loss_function, trg, attention, intermediate_
                 #num_total += preds.shape[1]
                 for sb, tb in zip(seqs, target.permute(1,0)):
                     tb = line_tensor_to_list(tb, trg.vocab.stoi['<eos>'])
+                    bpe_tb = tb
                     tb = flatten_bpe_encodings(tb, trg.vocab)
                     unflattened_pred = [trg.vocab.itos[i] if i < len(trg.vocab.itos) else i for i in sb]
                     sb = flatten_bpe_encodings(sb, trg.vocab)
@@ -231,8 +227,9 @@ def test(epoch, test_loader, model, loss_function, trg, attention, intermediate_
                     mini_acc_count += max(len(tb), len(sb))
                     num_corr += len(tb) == len(sb) and cp == len(sb)
                     num_total += 1
-                    if random.random() < .005 and intermediate_printing:
+                    if random.random() < .05 and intermediate_printing:
                         print('target:', tb)
+                        print('raw target:', [trg.vocab.itos[i] if i < len(trg.vocab.itos) else i for i in bpe_tb])
                         print('prediction:', sb)
                         print('raw pred:', unflattened_pred)
                     if return_all_predictions:
@@ -251,7 +248,7 @@ def run(params: Params, device: torch.device, model_save_path: Optional[str], mo
     if model_load_path is not None:
         with open(path.join(model_load_path, 'hyper_params.pickle'), 'rb') as f:
             params = pickle.load(f)
-        dataset, validset, testset, src, trg = get_datasets_and_fields(train_path, params.REVERSE_INPUT, params.BPE_ENCODING_STEPS, params.BPE_COPY_MASKING, params.AUTO_BPE_MIN_FREQ, params.AST_BPE, eval(params.BPE_STEP_OVERRIDE_P_SCHEDULE))
+        dataset, validset, testset, src, trg = get_datasets_and_fields(train_path, params.REVERSE_INPUT, params.BPE_ENCODING_STEPS, params.BPE_COPY_MASKING, params.AUTO_BPE_MIN_FREQ, params.AST_BPE, eval(params.BPE_STEP_OVERRIDE_P_SCHEDULE), params.KL_BPE, params.KL_BPE_MIN_FREQ)
         train_loader = get_data_loader(dataset, batch_size, device)
         valid_loader = get_data_loader(validset, batch_size, device)
         test_loader = get_data_loader(testset, batch_size, device)
@@ -263,7 +260,7 @@ def run(params: Params, device: torch.device, model_save_path: Optional[str], mo
             state_dict.pop('decoder.decoder.p_gen.0.bias')
         model.load_state_dict(state_dict)
     else:
-        dataset, validset, testset, src, trg = get_datasets_and_fields(train_path, params.REVERSE_INPUT, params.BPE_ENCODING_STEPS, params.BPE_COPY_MASKING, params.AUTO_BPE_MIN_FREQ, params.AST_BPE, eval(params.BPE_STEP_OVERRIDE_P_SCHEDULE))
+        dataset, validset, testset, src, trg = get_datasets_and_fields(train_path, params.REVERSE_INPUT, params.BPE_ENCODING_STEPS, params.BPE_COPY_MASKING, params.AUTO_BPE_MIN_FREQ, params.AST_BPE, eval(params.BPE_STEP_OVERRIDE_P_SCHEDULE), params.KL_BPE, params.KL_BPE_MIN_FREQ)
         train_loader = get_data_loader(dataset, batch_size, device)
         valid_loader = get_data_loader(validset, batch_size, device)
         test_loader = get_data_loader(testset, batch_size, device)

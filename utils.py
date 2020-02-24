@@ -182,7 +182,7 @@ def get_random_bpe_data_src_trg_vocab(pairs, min_count, reverse_input, bpe_encod
     print('Vocab sizes, src:', len(SRC.vocab), 'trg:', len(TRG.vocab))
     return data, SRC, TRG
 
-def get_datasets(min_count=1, data_path='../data/datasets/nl_to_sql/advising', reverse_input=False, bpe_encoding_steps=0, bpe_copy_masking=False, auto_bpe_min_freq=1, ast_bpe=False, bpe_step_override_p_schedule=lambda x:0.0):
+def get_datasets(min_count=1, data_path='../data/datasets/nl_to_sql/advising', reverse_input=False, bpe_encoding_steps=0, bpe_copy_masking=False, auto_bpe_min_freq=1, ast_bpe=False, bpe_step_override_p_schedule=lambda x:0.0, kl_bpe=False, kl_bpe_min_freq=0):
     train_pairs = get_pairs(data_path+'.train')
     val_pairs = get_pairs(data_path+'.dev')
     test_pairs = get_pairs(data_path+'.test')
@@ -204,7 +204,10 @@ def get_datasets(min_count=1, data_path='../data/datasets/nl_to_sql/advising', r
         if bpe_encoding_steps > 0:
             bpe_encoder.fit([e.trg for e in pre_data], t=bpe_encoding_steps, vocab_map=True, ignore_mask=copy_mask)
         else:
-            bpe_encoder.fit_to_valid([e.trg for e in pre_data], [e.trg for e in pre_val_data], retention_count=-bpe_encoding_steps, vocab_map=True, ignore_mask=copy_mask, min_freq=auto_bpe_min_freq)
+            if kl_bpe:
+                bpe_encoder.fit_kl([e.trg for e in pre_data], min_freq=kl_bpe_min_freq ,vocab_map=True)
+            else:
+                bpe_encoder.fit_to_valid([e.trg for e in pre_data], [e.trg for e in pre_val_data], retention_count=-bpe_encoding_steps, vocab_map=True, ignore_mask=copy_mask, min_freq=auto_bpe_min_freq)
     else:
         bpe_encoder = None
     if bpe_step_override_p_schedule(100) == 0.:
@@ -255,3 +258,12 @@ def line_tensor_to_list(t, eos_idx):
 
 def flatten_bpe_encodings(list_of_ints, trg_vocab):
     return sum([trg_vocab.itos[i].split('__') if i < len(trg_vocab.itos) else [i] for i in list_of_ints], [])
+
+def sample_vocab(ls):
+    class v():
+        itos = {}
+        stoi = {}
+    vocab = v()
+    vocab.itos = ls
+    vocab.stoi = {w:i for i,w in enumerate(ls)}
+    return vocab

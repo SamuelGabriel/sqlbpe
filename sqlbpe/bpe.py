@@ -2,6 +2,7 @@ from collections import Counter
 import copy
 from itertools import repeat
 import random
+import numpy as np
 
 class BPEVocab():
     def __init__(self, min_idx=0, join_str='__'):
@@ -112,6 +113,56 @@ class BPE():
             idxtrgs, ignore_mask = self.transform_step(idxtrgs, bg, i, ignore_mask=ignore_mask)
         self.vocab.built_stringified_vocab(self.untransform)
         return t
+
+    def compute_score(self, Ec, vocab_size, count_entropy, ca, cb, cab):
+        Ec, vocab_size, count_entropy, ca, cb, cab, bca, bcb = float(Ec), float(vocab_size), float(count_entropy), float(ca), float(cb), float(cab), float(ca-cab), float(cb-cab)
+        bEc = Ec - cab
+        f = cab / bEc / Ec
+        term = f * count_entropy - f * (ca * np.log2(ca) + cb * np.log2(cb)) + np.log2(Ec / bEc) + np.log2((vocab_size + 1) / vocab_size) \
+            - (ca * np.log2(ca)) / bEc - (cb * np.log2(cb)) / bEc + (cab * np.log2(cab)) / bEc
+        etb = lambda: bcb * np.log2(bcb) / bEc
+        eta = lambda: bca * np.log2(bca) / bEc
+        return term + (etb() if bcb != 0. else 0.) + (eta() if bca != 0. else 0.)
+
+    def fit_kl(self, listofseqs, vocab_map=False, min_freq=0):
+        if vocab_map:
+            idxtrgs = self.vocab_map(listofseqs)
+        else:
+            idxtrgs = listofseqs
+        s = 0
+        def compute_score(Ec, vocab_size, count_entropy, ca, cb, cab):
+            Ec, vocab_size, count_entropy, ca, cb, cab, bca, bcb = float(Ec), float(vocab_size), float(count_entropy), \
+                                                                   float(ca), float(cb), float(cab), float(ca - cab), float(cb - cab)
+            bEc = Ec - cab
+            bca = ca - cab
+            bcb = cb - cab
+            if bca < min_freq or bcb < min_freq or cab < min_freq:
+                return 1
+            new_vocab_size = vocab_size + 1.
+            log = np.log2
+            new_terms = cab*log(cab) + (bca*log(bca) if bca != 0. else 0.) + (bcb*log(bcb) if bcb != 0. else 0.)
+            return (count_entropy - ca*log(ca) - cb*log(cb) + new_terms)/bEc - count_entropy/Ec + log(new_vocab_size/vocab_size) + log(Ec/bEc)
+
+        while True:
+            bgs = self.get_most_common_bigram(idxtrgs, return_all=True)
+            counts = Counter(idx for l in idxtrgs for idx in l)
+            Ec = sum(counts.values())
+            count_entropy = sum(float(c)*np.log2(c) for c in counts.values())
+            scores = {bg: compute_score(Ec,self.vocab.next_idx, count_entropy, counts[bg[0]], counts[bg[1]], c) for bg, c in bgs.items()}
+            min_bg = min(scores, key=scores.get)
+            min_score = scores[min_bg]
+            s+=1
+            if min_score >= 0:
+                break
+            else:
+                i = self.vocab.add(min_bg)
+                idxtrgs, _ = self.transform_step(idxtrgs, min_bg, i, ignore_mask=None)
+                print('added {} with score {} and count {}'.format(min_bg, min_score, bgs[min_bg]))
+
+        self.vocab.built_stringified_vocab(self.untransform)
+        return s
+
+
     
 
     def transform_step(self, idxtrgs, bg, idx, ignore_mask=None, dataset='train', restrictions=None):
@@ -182,7 +233,7 @@ class BPE():
             return [[self.base_vocab.itos[w] for w in s] for s in idxtrgs]
         return idxtrgs
 
-    def get_most_common_bigram(self, idxtrgs, ignore_mask=None, ignore_bigrams=set()):
+    def get_most_common_bigram(self, idxtrgs, ignore_mask=None, ignore_bigrams=set(), return_all=False):
         assert ignore_mask is None or len(ignore_mask) == len(idxtrgs) and all(len(s) == len(sm) for s, sm in zip(idxtrgs, ignore_mask))
 
         bg = []
@@ -198,6 +249,23 @@ class BPE():
                 bg.append((s[i],s[i+1]))
         if not bg:
             return None
-
+        if return_all:
+            return Counter(bg)
         return Counter(bg).most_common(1)[0][0]
+
+if __name__ == '__main__':
+    def sample_vocab(ls):
+        class v():
+            itos = {}
+            stoi = {}
+
+        vocab = v()
+        vocab.itos = ls
+        vocab.stoi = {w: i for i, w in enumerate(ls)}
+        return vocab
+    vocab = sample_vocab(['0', '1', '2', '3', '4'])
+    enc = BPE(vocab)
+    idxtrgs = [[1, 2, 3, 4], [3, 4]]
+    enc.fit_kl(idxtrgs)
+    print(enc.vocab.str_itos)
         
