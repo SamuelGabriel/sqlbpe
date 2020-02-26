@@ -114,6 +114,26 @@ class BPE():
         self.vocab.built_stringified_vocab(self.untransform)
         return t
 
+    def fit_min_count(self, listofseqs, min_count=100, vocab_map=False, ignore_mask=None):
+        assert ignore_mask is None or len(ignore_mask) == len(listofseqs) and all(len(s) == len(sm) for s, sm in zip(listofseqs, ignore_mask))
+        if vocab_map:
+            idxtrgs = self.vocab_map(listofseqs)
+        else:
+            idxtrgs = listofseqs
+        t = 0
+        while True:
+            bgs = self.get_most_common_bigram(idxtrgs, ignore_mask=ignore_mask, return_all=True)
+            counts = Counter(idx for l in idxtrgs for idx in l)
+            bgs = {bg:c for bg,c in bgs.items() if c > min_count and counts[bg[0]] > min_count and counts[bg[1]] > min_count}
+            if not bgs:
+                break
+            bg = max(bgs, key=bgs.get)
+            i = self.vocab.add(bg)
+            idxtrgs, ignore_mask = self.transform_step(idxtrgs, bg, i, ignore_mask=ignore_mask)
+            t += 1
+        self.vocab.built_stringified_vocab(self.untransform)
+        return t
+
     def compute_score(self, Ec, vocab_size, count_entropy, ca, cb, cab):
         Ec, vocab_size, count_entropy, ca, cb, cab, bca, bcb = float(Ec), float(vocab_size), float(count_entropy), float(ca), float(cb), float(cab), float(ca-cab), float(cb-cab)
         bEc = Ec - cab
@@ -134,8 +154,6 @@ class BPE():
             Ec, vocab_size, count_entropy, ca, cb, cab, bca, bcb = float(Ec), float(vocab_size), float(count_entropy), \
                                                                    float(ca), float(cb), float(cab), float(ca - cab), float(cb - cab)
             bEc = Ec - cab
-            bca = ca - cab
-            bcb = cb - cab
             if bca < min_freq or bcb < min_freq or cab < min_freq:
                 return 1
             new_vocab_size = vocab_size + 1.

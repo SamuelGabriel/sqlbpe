@@ -202,6 +202,9 @@ def get_datasets(min_count=1, data_path='../data/datasets/nl_to_sql/advising', r
         bpe_encoder = BPE(pre_TRG.vocab, restriction_map)
 
         if bpe_encoding_steps > 0:
+            if kl_bpe_min_freq:
+                print('Just doing as many steps as possible fullfilling the min freq condition, ignoring bpe_encoding_steps')
+                bpe_encoder.fit_min_count([e.trg for e in pre_data],min_count=kl_bpe_min_freq,vocab_map=True,ignore_mask=copy_mask)
             bpe_encoder.fit([e.trg for e in pre_data], t=bpe_encoding_steps, vocab_map=True, ignore_mask=copy_mask)
         else:
             if kl_bpe:

@@ -3,14 +3,14 @@ from typing import NamedTuple, Optional
 class Params(NamedTuple):
     INPUT_DIM: Optional[int] = None 
     OUTPUT_DIM: Optional[int] = None
-    HID_DIM: int = 200 # only works with KLD for small HID_DIM...
+    HID_DIM: int = 200 # only works with KLD for small HID_DIM... # Todo: Increase hid dim, take Iyer as fixpoint
     DROPOUT: float = .1
     LEARNING_RATE: float = 1e-3
     FIXED_KAPPA: Optional[float] = 500
     TEACHER_FORCING_RATIO: float = 1.
     EMBEDDING_GRADIENT_NORM_CLIP: float = 0.1
     GRADIENT_NORM_CLIP: float = 5.
-    NUM_DECODER_LAYERS: int = 4
+    NUM_DECODER_LAYERS: int = 4 # Todo: Reduce both num layers
     NUM_ENCODER_LAYERS: int = 2
     BIDIRECTIONAL_ENCODER: bool = False
     REVERSE_INPUT: bool = False
